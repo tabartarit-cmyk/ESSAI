@@ -82,6 +82,7 @@ set(ASHA_SRC
   src/asha_bt.cpp
   src/asha_comms.cpp
   src/asha_led.cpp
+  src/asha_button.cpp
   src/gatt_server.cpp
   src/hearing_aid.cpp
   src/usb_descriptors.cpp

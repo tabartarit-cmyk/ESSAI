@@ -377,20 +377,93 @@ void HearingAid::set_connections_allowed(bool allowed)
     }
     if (connections_allowed && !allowed) {
         connections_allowed = false;
+        pending_disconnect_ticks = 0U;
         gap_stop_scan();
         for (auto ha : hearing_aids) {
             if (ha->is_connected()) {
                 ha->disconnect();
             }
         }
+        led_mgr.set_led(LEDManager::State::Off);
     } else if (!connections_allowed && allowed) {
         connections_allowed = true;
+        refresh_led();
         start_scan();
+    }
+}
+
+bool HearingAid::get_connections_allowed()
+{
+    return connections_allowed;
+}
+
+bool HearingAid::request_audio_restart()
+{
+    if (!connections_allowed || !audio_streaming_enabled || pending_disconnect_ticks > 0U
+        || num_connected() == 0) {
+        return false;
+    }
+    // Avec le streaming désactivé, la boucle audio envoie l'ACP Stop aux aids
+    // qui diffusent. Il est réactivé dans process_audio() après le délai, ce
+    // qui relance les deux aids ensemble (ACP Start).
+    audio_streaming_enabled = false;
+    audio_restart_ticks = audio_restart_gap_ticks;
+    return true;
+}
+
+void HearingAid::request_disconnect_all()
+{
+    if (!connections_allowed) {
+        return;
+    }
+    bool any_streaming = false;
+    for (auto ha : hearing_aids) {
+        if (ha->is_streaming()) {
+            any_streaming = true;
+        }
+    }
+    audio_restart_ticks = 0U;
+    audio_streaming_enabled = false;   // provoque l'ACP Stop sur les aids actifs
+    pending_disconnect_ticks = any_streaming ? stop_before_disconnect_ticks : 1U;
+}
+
+void HearingAid::start_pairing()
+{
+    audio_restart_ticks = 0U;
+    pending_disconnect_ticks = 0U;
+    audio_streaming_enabled = true;
+    // Oublie les appairages (full_set_paired = false) et déconnecte les aids
+    delete_pair();
+    // Connexion automatique au premier appareil auditif trouvé, comme au
+    // démarrage lorsqu'aucune application n'est connectée en USB.
+    auto_pair_enabled = true;
+    if (!connections_allowed) {
+        set_connections_allowed(true);
+    } else {
+        gap_stop_scan();
+        refresh_led();
+        start_scan();
+    }
+}
+
+void HearingAid::refresh_led()
+{
+    if (!connections_allowed) {
+        led_mgr.set_led(LEDManager::State::Off);
+    } else if (full_set_connected()) {
+        led_mgr.set_led(LEDManager::State::On);
+    } else if (num_connected() >= 1) {
+        led_mgr.set_led_pattern(one_connected);
+    } else {
+        led_mgr.set_led_pattern(none_connected);
     }
 }
 
 void HearingAid::set_audio_streaming_enabled(bool enabled)
 {
+    // Une commande explicite annule les actions différées du bouton
+    audio_restart_ticks = 0U;
+    pending_disconnect_ticks = 0U;
     audio_streaming_enabled = enabled;
 }
 
@@ -515,6 +588,9 @@ void HearingAid::on_disconnected(hci_con_handle_t handle, uint8_t status, uint8_
         led_mgr.set_led_pattern(one_connected);
     } else {
         led_mgr.set_led_pattern(none_connected);
+    }
+    if (!connections_allowed) {
+        led_mgr.set_led(LEDManager::State::Off);
     }
     start_scan();
 }
@@ -1231,6 +1307,15 @@ bool HearingAid::process_audio()
 #ifdef PICO_ASHA_ENC_STATS
     bool send_enc_times = false;
 #endif
+
+    // Actions différées du bouton BOOTSEL
+    if (audio_restart_ticks > 0U && --audio_restart_ticks == 0U) {
+        audio_streaming_enabled = true;    // relance : ACP Start sur les deux aids
+    }
+    if (pending_disconnect_ticks > 0U && --pending_disconnect_ticks == 0U) {
+        audio_streaming_enabled = true;    // rétabli pour la prochaine connexion
+        set_connections_allowed(false);
+    }
 
     uint32_t w_index = asha_audio_get_write_index();
     int16_t usb_vol_l = asha_audio_get_curr_usb_vol(AshaAudioSide::AudioLeft);

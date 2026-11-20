@@ -3,6 +3,7 @@
 #include <hardware/watchdog.h>
 
 #include "asha_bt.hpp"
+#include "asha_button.hpp"
 #include "asha_comms.hpp"
 #include "asha_uuid.hpp"
 #include "asha_variant.hpp"
@@ -237,6 +238,9 @@ static void audio_timer_handler(btstack_timer_source_t* timer)
 {
     btstack_run_loop_set_timer(timer, ha_audio_interval_ms);
     btstack_run_loop_add_timer(timer);
+
+    // Bouton BOOTSEL (lecture toutes les 10 ms, actions au relâchement)
+    button::service();
 
     // First process audio
     if (HearingAid::process_audio()) {

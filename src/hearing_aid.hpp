@@ -69,6 +69,12 @@ constexpr uint32_t start_notify_timeout_ticks = 3000;
 #endif
 constexpr uint32_t second_aid_wait_ticks = PICO_ASHA_SECOND_AID_WAIT_MS;
 
+// Bouton BOOTSEL : durée pendant laquelle l'audio reste coupé lors d'une
+// relance manuelle (le temps que les ACP Stop soient traités), et délai laissé
+// aux aids pour recevoir l'ACP Stop avant de les déconnecter. Boucle audio = 1 ms.
+constexpr uint32_t audio_restart_gap_ticks      = 600;
+constexpr uint32_t stop_before_disconnect_ticks = 500;
+
 enum class Side  {Left = 0, Right = 1};
 enum class Mode  {Mono = 0, Binaural = 1};
 enum class Codec {G722_16, G722_24};
@@ -179,6 +185,19 @@ struct HearingAid
     static void set_audio_streaming_enabled(bool enabled);
     static void set_auto_pair_enabled(bool enabled);
     static void start_scan();
+
+    /* Fonctions utilisées par le bouton BOOTSEL */
+    static bool get_connections_allowed();
+    // Coupe puis relance le flux audio (ACP Stop puis ACP Start). Renvoie false
+    // si rien n'a été fait (aucun appareil connecté, streaming désactivé...).
+    static bool request_audio_restart();
+    // Envoie l'ACP Stop aux aids puis les déconnecte (connexions désactivées).
+    static void request_disconnect_all();
+    // Efface les appairages et relance une recherche avec appairage automatique.
+    static void start_pairing();
+    // Remet la LED dans l'état correspondant à la situation actuelle.
+    static void refresh_led();
+
     static void on_ad_report(const AdvertisingReport& report);
     static void connect(const bd_addr_t addr, bd_addr_type_t addr_type);
     static void on_connected(bd_addr_t addr, hci_con_handle_t handle);
@@ -301,6 +320,10 @@ private:
     inline static bool connections_allowed;
     inline static bool audio_streaming_enabled;
     inline static bool auto_pair_enabled;
+
+    // Compteurs (en ticks de la boucle audio) des actions différées du bouton
+    inline static uint32_t audio_restart_ticks = 0U;
+    inline static uint32_t pending_disconnect_ticks = 0U;
 
     /* Member functions */
 
