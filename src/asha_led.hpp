@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include <pico/async_context.h>
@@ -35,12 +36,16 @@ public:
     void set_ctx(async_context_t* ctx) {led_ctx = ctx;}
     void set_led(State led_state);
     void set_led_pattern(Pattern const& pattern);
+    void set_led_blink(size_t count);
 private:
     void disable_curr_led_pattern();
     static void handle_led_work(async_context_t* ctx, async_at_time_worker_t *worker);
     async_context_t *led_ctx = nullptr;
     async_at_time_worker_t led_worker = {};
     Pattern curr_pattern = {};
+    Pattern status_pattern = {};
+    State status_led_state = State::Off;
+    bool temporary_pattern = false;
 };
 
 } // namespace asha

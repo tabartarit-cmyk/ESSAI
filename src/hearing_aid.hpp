@@ -175,6 +175,8 @@ struct HearingAid
 
     static void on_serial_host_connected();
     static bool is_addr_connected(const bd_addr_t addr);
+    static bool is_any_streaming();
+    static void restart_audio_stream();
     static void set_connections_allowed(bool allowed);
     static void set_audio_streaming_enabled(bool enabled);
     static void set_auto_pair_enabled(bool enabled);

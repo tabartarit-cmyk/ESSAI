@@ -1,6 +1,13 @@
 #include <btstack.h>
 #include <pico/cyw43_arch.h>
 #include <hardware/watchdog.h>
+#include <hardware/gpio.h>
+#if PICO_RP2040
+#include <hardware/regs/io_qspi.h>
+#include <hardware/structs/ioqspi.h>
+#include <hardware/structs/sio.h>
+#include <hardware/sync.h>
+#endif
 
 #include "asha_bt.hpp"
 #include "asha_comms.hpp"
@@ -69,6 +76,74 @@ static btstack_timer_source_t delay_start_timer = {};
 static void delay_start_timer_handler(btstack_timer_source_t * timer);
 
 static void add_bonded_to_fal();
+static void handle_bootsel_button();
+
+static constexpr uint32_t bootsel_debounce_ticks = 25;
+static constexpr uint32_t bootsel_long_press_ticks = 1000;
+
+static bool bootsel_button_pressed()
+{
+#if PICO_RP2040
+    constexpr uint CS_PIN_INDEX = 1;
+    uint32_t const interrupt_state = save_and_disable_interrupts();
+    hw_write_masked(&ioqspi_hw->io[CS_PIN_INDEX].ctrl,
+                    GPIO_OVERRIDE_LOW << IO_QSPI_GPIO_QSPI_SS_CTRL_OEOVER_LSB,
+                    IO_QSPI_GPIO_QSPI_SS_CTRL_OEOVER_BITS);
+    for (uint32_t i = 0; i < 1000; ++i) {
+        tight_loop_contents();
+    }
+    bool const pressed = !(sio_hw->gpio_hi_in & (1u << CS_PIN_INDEX));
+    hw_write_masked(&ioqspi_hw->io[CS_PIN_INDEX].ctrl,
+                    GPIO_OVERRIDE_NORMAL << IO_QSPI_GPIO_QSPI_SS_CTRL_OEOVER_LSB,
+                    IO_QSPI_GPIO_QSPI_SS_CTRL_OEOVER_BITS);
+    restore_interrupts(interrupt_state);
+    return pressed;
+#elif PICO_RP2350
+    return !gpio_get(47);
+#else
+    return false;
+#endif
+}
+
+static void handle_bootsel_button()
+{
+    static bool sampled_pressed = false;
+    static bool stable_pressed = false;
+    static bool long_press_handled = false;
+    static uint32_t sample_ticks = 0;
+    static uint32_t press_ticks = 0;
+
+    bool const pressed = bootsel_button_pressed();
+    if (pressed != sampled_pressed) {
+        sampled_pressed = pressed;
+        sample_ticks = 0;
+    } else if (sample_ticks < bootsel_debounce_ticks) {
+        ++sample_ticks;
+    }
+
+    if (sample_ticks == bootsel_debounce_ticks && stable_pressed != sampled_pressed) {
+        stable_pressed = sampled_pressed;
+        if (stable_pressed) {
+            press_ticks = 0;
+            long_press_handled = false;
+        } else if (!long_press_handled) {
+            HearingAid::restart_audio_stream();
+            led_mgr.set_led_blink(1);
+        }
+    }
+
+    if (!stable_pressed || long_press_handled) return;
+    if (++press_ticks >= bootsel_long_press_ticks) {
+        long_press_handled = true;
+        if (HearingAid::is_any_streaming()) {
+            HearingAid::set_connections_allowed(false);
+            led_mgr.set_led_blink(2);
+        } else {
+            HearingAid::set_connections_allowed(true);
+            led_mgr.set_led_blink(3);
+        }
+    }
+}
 
 static void add_bonded_to_fal()
 {
@@ -103,6 +178,11 @@ extern "C" void bt_main()
     async_context_t *ctx = cyw43_arch_async_context();
 
     led_mgr.set_ctx(ctx);
+#if PICO_RP2350
+    gpio_init(47);
+    gpio_set_dir(47, GPIO_IN);
+    gpio_pull_up(47);
+#endif
 
     if (runtime_settings.get_hci_dump_enabled()) {
         hci_dump_init(&pa_hci_dump_impl);
@@ -237,6 +317,8 @@ static void audio_timer_handler(btstack_timer_source_t* timer)
 {
     btstack_run_loop_set_timer(timer, ha_audio_interval_ms);
     btstack_run_loop_add_timer(timer);
+
+    handle_bootsel_button();
 
     // First process audio
     if (HearingAid::process_audio()) {

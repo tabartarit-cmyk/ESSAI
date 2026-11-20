@@ -92,6 +92,13 @@ Once paired, streaming audio is incredibly simple. Just select `Pico-ASHA adapte
 sound devices in your OS. The OS volume control should be able to control the streaming audio volume 
 in your hearing device.
 
+### BOOTSEL button
+
+While the adapter is running, a short BOOTSEL press asks connected hearing aids to stop and restart the audio
+stream. The LED flashes once to confirm. Hold BOOTSEL for at least one second to disconnect hearing aids when
+audio is streaming (two flashes), or to allow connections and resume scanning when no audio is streaming
+(three flashes). The LED then returns to its normal connection-status indication.
+
 ## Updating firmware
 
 You can update firmware using steps 2 & 3 from the first start instructions. Your hearing devices 

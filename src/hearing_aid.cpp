@@ -297,6 +297,27 @@ int HearingAid::num_connected()
     return num;
 }
 
+bool HearingAid::is_any_streaming()
+{
+    for (auto ha : hearing_aids) {
+        if (ha->is_streaming()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void HearingAid::restart_audio_stream()
+{
+    if constexpr (variant::uses_asha) {
+        for (auto ha : hearing_aids) {
+            if (ha->is_streaming()) {
+                ha->stop_request_from_other = true;
+            }
+        }
+    }
+}
+
 std::array<HearingAid*,2> HearingAid::connected_has()
 {
     std::array<HearingAid*,2> has = {nullptr, nullptr};
