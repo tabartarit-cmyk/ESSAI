@@ -44,10 +44,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(ENABLE_AUDIO_ENC_STATS "Enable audio downsampling and encoding statistics" OFF)
 option(ENABLE_L2CAP_TX_TRACE "Emit per-SDU L2CAP transmit handshake diagnostics" OFF)
-# Note from the original author: Windows could not start the network interface (RNDIS and NCM both failed).
-option(PICO_ASHA_USB_NET "Add a USB network interface serving a settings web page at http://192.168.7.1" ON)
-# NCM: Windows 11, Linux, Android. RNDIS_ECM: RNDIS for Windows, ECM for Linux and Android.
-set(PICO_ASHA_USB_NET_MODE "NCM" CACHE STRING "USB network protocol (NCM or RNDIS_ECM)")
 
 # Firmware variants for the Raspberry Pi Pico 2 W. Each one is its own executable:
 #   pico_asha          ASHA only. The only variant which streams audio.
@@ -107,37 +103,6 @@ endif()
 # -Wall only: -Werror is not used so that a new compiler warning does not stop the build
 set_source_files_properties(${ASHA_SRC} src/classic_bt.cpp PROPERTIES COMPILE_OPTIONS "-Wall")
 
-if (PICO_ASHA_USB_NET)
-  list(APPEND pico_asha_defines "PICO_ASHA_USB_NET=1")
-  if (PICO_ASHA_USB_NET_MODE STREQUAL "NCM")
-    list(APPEND pico_asha_defines "PICO_ASHA_USB_NET_NCM=1")
-  endif()
-  list(APPEND ASHA_SRC src/usb_net.cpp)
-
-  # The TinyUSB network class must be compiled. Some Pico SDK versions already
-  # do it; add the files only when they are not part of the TinyUSB target.
-  set(ASHA_TUSB_SRCS "")
-  foreach(_t tinyusb_device_unmarked tinyusb_device_base tinyusb_device)
-    if (TARGET ${_t})
-      get_target_property(_s ${_t} INTERFACE_SOURCES)
-      if (_s)
-        list(APPEND ASHA_TUSB_SRCS ${_s})
-      endif()
-    endif()
-  endforeach()
-  set(ASHA_NET_FILES src/class/net/ecm_rndis_device.c src/class/net/ncm_device.c src/class/net/net_device.c)
-  if (NOT PICO_ASHA_USB_NET_MODE STREQUAL "NCM")
-    list(APPEND ASHA_NET_FILES lib/networking/rndis_reports.c)
-  endif()
-  foreach(_f ${ASHA_NET_FILES})
-    get_filename_component(_name ${_f} NAME)
-    if (EXISTS "${PICO_TINYUSB_PATH}/${_f}" AND NOT "${ASHA_TUSB_SRCS}" MATCHES "${_name}")
-      message(STATUS "Adding TinyUSB ${_f}")
-      list(APPEND ASHA_SRC "${PICO_TINYUSB_PATH}/${_f}")
-    endif()
-  endforeach()
-endif()
-
 if (ENABLE_AUDIO_ENC_STATS)
   list(APPEND pico_asha_defines "PICO_ASHA_ENC_STATS=1")
 endif(ENABLE_AUDIO_ENC_STATS)
@@ -189,12 +154,6 @@ function(add_pico_asha_variant target variant_define)
     tinyusb_board
     etl::etl
   )
-
-  if (PICO_ASHA_USB_NET)
-    # lwIP without an OS and without Wi-Fi: the network is the USB interface
-    target_link_libraries(${target} pico_lwip pico_lwip_nosys)
-    target_include_directories(${target} PRIVATE ${PICO_TINYUSB_PATH}/lib/networking)
-  endif()
 
   target_link_options(${target} PUBLIC -Wl,--print-memory-usage)
 endfunction()
