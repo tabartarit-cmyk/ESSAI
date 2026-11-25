@@ -79,6 +79,15 @@ static constexpr bool char_used(size_t index)
     }
 }
 
+/* The GUI shows the battery on a 0-10 scale (MFI). The BAS gives a
+   percentage: scale it, never showing 0 while the battery is not empty. */
+static uint8_t bas_percent_to_level(uint8_t pct)
+{
+    if (pct > 100U) { pct = 100U; }
+    uint8_t level = (uint8_t)((pct + 5U) / 10U);
+    return (pct > 0U && level == 0U) ? 1U : level;
+}
+
 /* Process state which follows the characteristic reads: ASHA opens the
    L2CAP CoC, the MFI probe goes straight to the battery notifications. */
 static constexpr uint32_t state_after_reads()
@@ -212,7 +221,8 @@ void HearingAid::process()
                 ha->set_process_busy();
                 res = gatt_client_write_client_characteristic_configuration(&HearingAid::handle_notification_reg, 
                                                                             ha->conn_handle, 
-                                                                            &ha->services.mfi.battery, 
+                                                                            variant::uses_mfi ? &ha->services.mfi.battery
+                                                                                              : &ha->services.bas.level,
                                                                             GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION);
                 break;
             case EnASPNotification:
@@ -803,6 +813,9 @@ void HearingAid::handle_service_discovery(PACKET_HANDLER_PARAMS)
             } else if (MfiUUID::service == s.uuid128) {
                 short_log(ha->conn_id, "%s", "MFI service discovered");
                 ha->services.mfi.service = s;
+            } else if (BasUUID::service16 == s.uuid16) {
+                short_log(ha->conn_id, "%s", "BAS service discovered");
+                ha->services.bas.service = s;
             }
             break;
         }
@@ -898,6 +911,9 @@ void HearingAid::handle_char_discovery(PACKET_HANDLER_PARAMS)
             } else if (MfiUUID::battery == c.uuid128) {
                 short_log(ha->conn_id, "%s", "MFI battery char discovered");
                 ha->services.mfi.battery = c;
+            } else if (BasUUID::level16 == c.uuid16) {
+                short_log(ha->conn_id, "%s", "BAS battery level char discovered");
+                ha->services.bas.level = c;
             }
             break;
         }
@@ -978,6 +994,10 @@ void HearingAid::handle_char_read(PACKET_HANDLER_PARAMS)
                 ha->sw_vers.append((const char*)val, val_len);
             } else if (val_handle == ha->services.mfi.battery.value_handle) {
                 ha->battery_level = val[0];
+            } else if (ha->services.bas.level.value_handle != 0U
+                       && val_handle == ha->services.bas.level.value_handle) {
+                ha->battery_level = bas_percent_to_level(val[0]);
+                short_log(ha->conn_id, "BAS battery: %u%%", (unsigned)val[0]);
             }
             break;
 
@@ -1226,8 +1246,13 @@ void HearingAid::handle_notification_reg(PACKET_HANDLER_PARAMS)
                 //LOG_INFO("%s: ASP notifications enabled", ha->get_side_str());
                 // The MFI battery step only exists in the MFI variant: the ASHA
                 // variant does not touch the MFI service at all.
-                ha->process_state = variant::uses_mfi ? ProcessState::EnBattNotification
-                                                      : ProcessState::Finalize;
+                // ASHA variant: also follow the standard BAS battery level, if the
+                // aid has it and it can notify (otherwise the write would fail).
+                bool const bas_notify = variant::uses_asha
+                    && ha->services.bas.level.value_handle != 0U
+                    && (ha->services.bas.level.properties & ATT_PROPERTY_NOTIFY);
+                ha->process_state = (variant::uses_mfi || bas_notify) ? ProcessState::EnBattNotification
+                                                                      : ProcessState::Finalize;
                 add_event_to_buffer(ha->conn_id, EventPacket(EventType::ASPNotEnable));
             }
             break;
@@ -1298,8 +1323,12 @@ void HearingAid::handle_gatt_notification(PACKET_HANDLER_PARAMS)
                     add_event_to_buffer(ha->conn_id, err_ev_pkt);
                     break;
             }
-        } else if (val_handle == ha->services.mfi.battery.value_handle) {
-            ha->battery_level = gatt_event_notification_get_value(packet)[0];
+        } else if (val_handle == ha->services.mfi.battery.value_handle
+                   || (ha->services.bas.level.value_handle != 0U
+                       && val_handle == ha->services.bas.level.value_handle)) {
+            uint8_t const raw = gatt_event_notification_get_value(packet)[0];
+            ha->battery_level = (val_handle == ha->services.mfi.battery.value_handle)
+                                    ? raw : bas_percent_to_level(raw);
             EventPacket ev_pkt(EventType::MfiBatteryRead);
             ev_pkt.data.battery_level = ha->battery_level;
             add_event_to_buffer(ha->conn_id, ev_pkt);

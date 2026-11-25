@@ -101,6 +101,15 @@ namespace MfiUUID
     inline constexpr UUID battery("24e1dff3-ae90-41bf-bfbd-2cf8df42bf87");
 }
 
+/* Standard BLE Battery Service (0x180F) and Battery Level characteristic (0x2A19):
+   percentage 0-100. Optional: used by the ASHA variant if the aid exposes it. */
+
+namespace BasUUID
+{
+    inline constexpr UUID service16(0x180F);
+    inline constexpr UUID level16(0x2A19);
+}
+
 namespace GapUUID
 {
     inline constexpr UUID service16(ORG_BLUETOOTH_SERVICE_GENERIC_ACCESS);

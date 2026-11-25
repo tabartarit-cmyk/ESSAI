@@ -8,8 +8,9 @@
 // (targets pico_asha, pico_asha_mfi and pico_asha_classic).
 //
 //  ASHA    : ASHA only (service 0xFDF0, L2CAP CoC, G.722). The only variant
-//            which streams audio. No MFi step is run (no discovery, no read,
-//            no battery notification).
+//            which streams audio. No MFi step is run. It does read the
+//            standard BLE Battery Service (0x180F), if the aid has one, and
+//            follows its notifications.
 //  MFI     : MFi only (Apple service, battery). Diagnostic probe: connect,
 //            pair, read the battery level and enable its notifications.
 //            No ASHA step. No audio: Apple's MFi audio protocol is not

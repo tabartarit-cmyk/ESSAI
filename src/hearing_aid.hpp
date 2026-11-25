@@ -244,20 +244,29 @@ private:
             gatt_client_service_t service = {};
             gatt_client_characteristic_t battery = {};
         } mfi = {};
+
+        // Standard BLE Battery Service (optional, ASHA variant)
+        struct {
+            gatt_client_service_t service = {};
+            gatt_client_characteristic_t level = {};
+        } bas = {};
     } services = {};
 
-    std::array<gatt_client_service_t*, 4> service_arr = {
+    std::array<gatt_client_service_t*, 5> service_arr = {
         &services.gap.service,
         &services.dis.service,
         &services.asha.service,
-        &services.mfi.service
+        &services.mfi.service,
+        &services.bas.service
     };
-    std::array<comm::EventType, 4> service_ev_arr = {
+    // The BAS reuses the MFI events: the GUI shows both as "battery"
+    std::array<comm::EventType, 5> service_ev_arr = {
         comm::EventType::DiscGAPChar, comm::EventType::DiscDISChar, comm::EventType::DiscASHAChar, comm::EventType::DiscMFIChar,
+        comm::EventType::DiscMFIChar,
     };
     size_t service_index = 0;
 
-    std::array<gatt_client_characteristic_t*, 8> chars_arr = {
+    std::array<gatt_client_characteristic_t*, 9> chars_arr = {
         &services.asha.rop,
         &services.gap.device_name,
         &services.dis.manufacture_name,
@@ -266,10 +275,12 @@ private:
         &services.dis.sw_vers,
         &services.asha.psm,
         &services.mfi.battery,
+        &services.bas.level,
     };
-    std::array<comm::EventType, 8> chars_ev_arr = {
+    std::array<comm::EventType, 9> chars_ev_arr = {
         comm::EventType::ROPRead, comm::EventType::DevNameRead, comm::EventType::MfgRead, comm::EventType::ModelRead,
         comm::EventType::FWRead,  comm::EventType::SWRead,      comm::EventType::PSMRead, comm::EventType::MfiBatteryRead,
+        comm::EventType::MfiBatteryRead,
     };
     size_t chars_index = 0;
     constexpr static size_t cached_chars_index = 6;
