@@ -111,3 +111,129 @@ jobs:
               with:
                 name: pico-asha-gui-win64
                 path: gui/build/PicoASHAGui-Installed/PicoASHAGui
+
+    build_gui_linux:
+        name: Build GUI for Linux (AppImage)
+        runs-on: ubuntu-22.04
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Install Qt
+              uses: jurplel/install-qt-action@v4.2.1
+              with:
+                version: '6.8.3'
+                host: 'linux'
+                target: 'desktop'
+                arch: 'linux_gcc_64'
+                modules: 'qtserialport'
+                cache: 'true'
+                cache-key-prefix: 'install-qt-action'
+                setup-python: 'true'
+                set-env: 'true'
+
+            - name: Install system libraries
+              run: |
+                sudo apt-get update
+                sudo apt-get install -y ninja-build libfuse2 libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0
+
+            - name: Configure and compile GUI
+              run: |
+                cd gui
+                cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+                cmake --build build
+
+            - name: Package AppImage
+              run: |
+                cd gui
+                DESTDIR="$PWD/AppDir" cmake --install build
+                wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+                wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+                chmod +x linuxdeploy-*.AppImage
+                export APPIMAGE_EXTRACT_AND_RUN=1
+                export QMAKE="$QT_ROOT_DIR/bin/qmake"
+                export OUTPUT=Pico-ASHA-GUI-x86_64.AppImage
+                ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt \
+                  --executable AppDir/usr/bin/PicoASHAGui \
+                  --desktop-file AppDir/usr/share/applications/pico-asha-gui.desktop \
+                  --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/pico-asha-gui.png \
+                  --output appimage
+
+            - name: Upload package
+              uses: actions/upload-artifact@v4
+              with:
+                name: pico-asha-gui-linux-x86_64
+                path: |
+                    gui/Pico-ASHA-GUI-x86_64.AppImage
+                    gui/linux/99-pico-asha.rules
+
+    build_gui_android:
+        name: Build GUI for Android (APK)
+        runs-on: ubuntu-22.04
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            # Qt pour Android a besoin d'une installation Qt « bureau » pour ses outils de compilation
+            - name: Install Qt (host tools)
+              uses: jurplel/install-qt-action@v4.2.1
+              with:
+                version: '6.8.3'
+                host: 'linux'
+                target: 'desktop'
+                arch: 'linux_gcc_64'
+                cache: 'true'
+                cache-key-prefix: 'install-qt-host'
+                setup-python: 'true'
+                set-env: 'true'
+
+            - name: Remember the host Qt path
+              run: echo "QT_HOST_PATH=$QT_ROOT_DIR" >> "$GITHUB_ENV"
+
+            - name: Install Qt for Android
+              uses: jurplel/install-qt-action@v4.2.1
+              with:
+                version: '6.8.3'
+                host: 'linux'
+                target: 'android'
+                arch: 'android_arm64_v8a'
+                cache: 'true'
+                cache-key-prefix: 'install-qt-android'
+                setup-python: 'true'
+                set-env: 'true'
+
+            - name: Setup Java
+              uses: actions/setup-java@v4
+              with:
+                distribution: 'temurin'
+                java-version: '17'
+
+            - name: Setup Android SDK
+              uses: android-actions/setup-android@v3
+
+            - name: Install Android platform and NDK
+              run: |
+                sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;26.1.10909125"
+
+            - name: Install Ninja
+              run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+            - name: Configure cmake
+              run: |
+                cd gui
+                "$QT_ROOT_DIR/bin/qt-cmake" -S . -B build-android -G Ninja \
+                  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+                  -DQT_HOST_PATH="$QT_HOST_PATH" \
+                  -DANDROID_SDK_ROOT="$ANDROID_HOME" \
+                  -DANDROID_NDK_ROOT="$ANDROID_HOME/ndk/26.1.10909125"
+
+            - name: Build APK
+              run: |
+                cd gui
+                cmake --build build-android --target apk
+
+            - name: Upload APK
+              uses: actions/upload-artifact@v4
+              with:
+                name: pico-asha-gui-android
+                path: gui/build-android/android-build/build/outputs/apk/**/*.apk
