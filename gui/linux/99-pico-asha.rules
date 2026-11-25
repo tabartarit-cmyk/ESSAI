@@ -1,9 +1,0 @@
-# Pico-ASHA : accès à la liaison série USB sans être root.
-# À copier dans /etc/udev/rules.d/ puis : sudo udevadm control --reload-rules && sudo udevadm trigger
-# (puis débrancher / rebrancher la Pico)
-
-# Empêche ModemManager de « sonder » la Pico comme un modem
-ATTRS{idVendor}=="cafe", ATTRS{idProduct}=="4011", ENV{ID_MM_DEVICE_IGNORE}="1"
-
-# Autorise l'utilisateur connecté à ouvrir le port série
-SUBSYSTEM=="tty", ATTRS{idVendor}=="cafe", ATTRS{idProduct}=="4011", TAG+="uaccess", MODE="0660", GROUP="dialout"
