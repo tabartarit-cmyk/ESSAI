@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Pico-ASHA
-Comment=Control panel for the Pico-ASHA hearing aid streaming adapter
-Exec=PicoASHAGui
-Icon=pico-asha-gui
-Categories=AudioVideo;Audio;Utility;
-Terminal=false
