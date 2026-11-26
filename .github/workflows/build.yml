@@ -194,9 +194,12 @@ jobs:
               uses: jurplel/install-qt-action@v4.2.1
               with:
                 version: '6.8.3'
-                host: 'linux'
+                # Depuis Qt 6.7, Qt pour Android est publié sous « all_os » (pas « linux »)
+                host: 'all_os'
                 target: 'android'
                 arch: 'android_arm64_v8a'
+                aqtversion: '==3.3.0'
+                py7zrversion: '==0.22.*'
                 cache: 'true'
                 cache-key-prefix: 'install-qt-android'
                 setup-python: 'true'
