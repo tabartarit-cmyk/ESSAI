@@ -213,6 +213,10 @@ jobs:
 
             - name: Setup Android SDK
               uses: android-actions/setup-android@v3
+              with:
+                # Par défaut l'action installe le paquet « tools », qui n'existe plus
+                # dans sdkmanager. Les paquets utiles sont installés à l'étape suivante.
+                packages: ''
 
             - name: Install Android platform and NDK
               run: |
