@@ -1409,7 +1409,7 @@ bool HearingAid::process_audio()
         if (ha->process_state != ProcessState::Audio) { continue; }
         ha->credits = l2cap_cbm_available_credits(ha->cid);
         switch (ha->audio_state) {
-            case AudioState::Ready:
+            case AudioState::Ready: {
                 if constexpr (second_aid_wait_ticks > 0U) {
                     // Optional wait for the second aid of a full set (see
                     // second_aid_wait_ticks). It ends as soon as the other aid is
@@ -1470,6 +1470,7 @@ bool HearingAid::process_audio()
                     ha->sync_wait_ticks = 0U;
                 }
                 break;
+            }
             case AudioState::Streaming | AudioState::AudioBusy:
                 // The normal Streaming branch intentionally does not queue a
                 // second SDU while BTstack owns the first one. Without this
