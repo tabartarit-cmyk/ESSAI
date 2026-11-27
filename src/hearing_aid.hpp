@@ -57,6 +57,14 @@ constexpr uint32_t stop_max_ticks = 1000;
 // hand. The aids normally answer within a few milliseconds.
 constexpr uint32_t start_notify_timeout_ticks = 3000;
 
+// Synchronised restart of the two aids. When both aids are connected, an aid
+// that is ready to start (AudioState::Ready) waits until the other one is ready
+// to start too, so that both ACP Start are sent in the same pass of the audio
+// loop, whatever made the stream stop (silence on USB, BOOTSEL click, error...).
+// Safety net: after this long (audio loop ticks, 1 ms) the aid starts alone, as
+// it did before, so that a stuck aid can never block the other one.
+constexpr uint32_t start_sync_timeout_ticks = 1500;
+
 // Optional: when a full left/right set has been paired before but only one aid
 // is connected, hold that aid's first ACP Start back for up to this many
 // milliseconds (audio loop ticks) while waiting for the second aid. Without it
@@ -310,6 +318,10 @@ private:
     // a full set (see second_aid_wait_ticks).
     uint32_t hold_start_ticks = 0U;
 
+    // Ticks spent in Ready, able to start, while waiting for the other aid
+    // (see start_sync_timeout_ticks).
+    uint32_t sync_wait_ticks = 0U;
+
     std::array<uint8_t, ASHA_SDU_SIZE_BYTES> recv_buff = {};
 
     uint16_t conn_id = comm::unset_conn_id;
@@ -340,6 +352,7 @@ private:
     void set_audio_busy();
     void unset_audio_busy();
     void set_data_langth();
+    bool start_blocked_by_other();
     void send_acp_start();
     void send_acp_stop();
     void finish_stop();

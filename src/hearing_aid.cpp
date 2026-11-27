@@ -1434,10 +1434,13 @@ bool HearingAid::process_audio()
                         break;
                     }
                 }
-                if ((!ha->other || !ha->other->stop_request_from_other)
-                    && audio_streaming_enabled
-                    && pcm_is_streaming
-                    && ha->credits >= 4) {
+                bool const can_start = (!ha->other || !ha->other->stop_request_from_other)
+                                       && audio_streaming_enabled
+                                       && pcm_is_streaming
+                                       && ha->credits >= 4;
+                if (can_start
+                    && (!ha->start_blocked_by_other() || ha->sync_wait_ticks >= start_sync_timeout_ticks)) {
+                        ha->sync_wait_ticks = 0U;
                         // Sync curr_vol from the host volume so the start payload
                         // reflects what the host is currently asking for. Without
                         // this, curr_vol's class default of -128 (the ASHA mute
@@ -1447,7 +1450,13 @@ bool HearingAid::process_audio()
                         ha->set_audio_busy();
                         ha->send_acp_start();
                         ha->ready_stuck_ticks = 0;
+                } else if (can_start) {
+                    // Ready, but the other aid is not ready to start yet: wait so
+                    // that both aids start together.
+                    ++ha->sync_wait_ticks;
+                    ha->ready_stuck_ticks = 0;
                 } else if (audio_streaming_enabled && pcm_is_streaming && ha->credits < 4) {
+                    ha->sync_wait_ticks = 0U;
                     // Aid wedged with credits stuck below the start gate. Only a
                     // fresh L2CAP CoC channel resets the credit window, so force
                     // a reconnect once the stuck timeout elapses.
@@ -1458,6 +1467,7 @@ bool HearingAid::process_audio()
                     }
                 } else {
                     ha->ready_stuck_ticks = 0;
+                    ha->sync_wait_ticks = 0U;
                 }
                 break;
             case AudioState::Streaming | AudioState::AudioBusy:
@@ -1780,6 +1790,26 @@ void HearingAid::send_acp_start()
     }
 }
 
+/* True if the other aid is in the audio phase but not ready to start yet (still
+   stopping, or Ready but waiting for credits / cooldown). If it is already
+   starting or streaming, this aid does not wait: it joins it. */
+bool HearingAid::start_blocked_by_other()
+{
+    if (!other || other->process_state != ProcessState::Audio) {
+        return false;
+    }
+    uint32_t const st = other->audio_state & ~(uint32_t)AudioState::AudioBusy;
+    if (st == AudioState::Stop) {
+        return true;
+    }
+    if (st != AudioState::Ready) {
+        return false;
+    }
+    bool const credits_ok = other->credits >= 4
+                            && (other->zero_credits_cooldown == 0U || other->credits >= 8);
+    return !credits_ok || other->hold_start_ticks > 0U;
+}
+
 void HearingAid::send_acp_stop()
 {
     using namespace comm;
@@ -1921,6 +1951,7 @@ void HearingAid::reset()
     acp_wait_ticks = 0U;
     acp_write_acked = false;
     hold_start_ticks = 0U;
+    sync_wait_ticks = 0U;
 
     if (!cached) {
         memset(addr, 0U, sizeof(bd_addr_t));
