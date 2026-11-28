@@ -73,6 +73,24 @@ constexpr uint32_t start_sync_timeout_ticks = 1500;
 // joining a running stream. Must stay below audio_sdu_gap_timeout_ticks.
 constexpr uint32_t peer_start_hold_ticks = 300;
 
+// Automatic resynchronisation of the two aids. While both aids stream, the time
+// at which each aid has finished receiving the SDU with the same index is
+// compared (the aids play what they receive after a fixed delay, so this offset
+// is about the offset heard between the ears). The average over
+// sync_window_pairs SDUs (10 ms each) is checked; when it stays above
+// PICO_ASHA_SYNC_MAX_OFFSET_US for sync_bad_windows_limit windows in a row, a
+// restart of both aids is requested (same as a BOOTSEL click). At most
+// sync_max_auto_attempts automatic restarts are made in a row, so that a weak
+// radio link cannot cause endless restarts. 0 disables the whole feature.
+#ifndef PICO_ASHA_SYNC_MAX_OFFSET_US
+#define PICO_ASHA_SYNC_MAX_OFFSET_US 25000
+#endif
+constexpr uint32_t sync_max_offset_us = PICO_ASHA_SYNC_MAX_OFFSET_US;
+constexpr uint32_t sync_window_pairs = 16;
+constexpr uint32_t sync_bad_windows_limit = 5;
+constexpr uint32_t sync_good_windows_reset = 60;
+constexpr uint32_t sync_max_auto_attempts = 3;
+
 // Optional: when a full left/right set has been paired before but only one aid
 // is connected, hold that aid's first ACP Start back for up to this many
 // milliseconds (audio loop ticks) while waiting for the second aid. Without it
@@ -206,6 +224,8 @@ struct HearingAid
     // dès que chaque aid a confirmé l'arrêt (aucune attente fixe). Renvoie false
     // si rien n'a été fait (connexions coupées, aucun aid ne diffuse...).
     static bool request_audio_restart();
+    static void sync_window_reset();
+    void note_tx_done();
     // Envoie l'ACP Stop aux aids puis les déconnecte (connexions désactivées).
     static void request_disconnect_all();
     // Efface les appairages et relance une recherche avec appairage automatique.
@@ -347,6 +367,17 @@ private:
 
     // Compteurs (en ticks de la boucle audio) des actions différées du bouton
     inline static bool audio_restart_requested = false;
+
+    // Measure of the offset between the aids (see sync_max_offset_us)
+    inline static uint64_t sync_sum_us = 0U;
+    inline static uint32_t sync_pairs = 0U;
+    inline static uint32_t sync_bad_windows = 0U;
+    inline static uint32_t sync_good_windows = 0U;
+    inline static uint32_t sync_attempts = 0U;
+    inline static bool sync_reported = false;
+    std::array<uint32_t, 8> tx_done_idx = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+                                           0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+    std::array<uint32_t, 8> tx_done_us = {};
     inline static uint32_t pending_disconnect_ticks = 0U;
 
     /* Member functions */

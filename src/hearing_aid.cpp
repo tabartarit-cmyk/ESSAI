@@ -2,6 +2,7 @@
 #include <bitset>
 #include <cmath>
 #include <pico/assert.h>
+#include <pico/time.h>
 
 #include "hearing_aid.hpp"
 #include "asha_uuid.hpp"
@@ -1179,6 +1180,7 @@ void HearingAid::handle_l2cap_cbm(PACKET_HANDLER_PARAMS)
             ha->audio_tx_pending_ticks = 0;
             ha->audio_sdu_gap_ticks = 0;
             ha->unset_audio_busy();
+            ha->note_tx_done();
             break;
         case L2CAP_EVENT_CHANNEL_CLOSED:
             cid = l2cap_event_channel_closed_get_local_cid(packet);
@@ -1296,6 +1298,8 @@ void HearingAid::handle_gatt_notification(PACKET_HANDLER_PARAMS)
                         // Mono only if this aid is alone; if the other one is about to
                         // start, encode in stereo from the beginning.
                         asha_audio_set_encode_mono(!other_streaming && !other_pending);
+                        sync_window_reset();
+                        ha->tx_done_idx.fill(0xFFFFFFFFu);
                         ha->sync_hold = other_pending;
                         ha->sync_hold_ticks = 0U;
                         if (other_streaming && ha->other->sync_hold) {
@@ -1833,6 +1837,68 @@ bool HearingAid::start_blocked_by_other()
     bool const credits_ok = other->credits >= 4
                             && (other->zero_credits_cooldown == 0U || other->credits >= 8);
     return !credits_ok || other->hold_start_ticks > 0U;
+}
+
+void HearingAid::sync_window_reset()
+{
+    sync_sum_us = 0U;
+    sync_pairs = 0U;
+    sync_bad_windows = 0U;
+    sync_reported = false;
+}
+
+/* Called when an SDU has been completely sent to this aid. Compares the time with
+   the one of the other aid for the same SDU, and asks for a restart of both aids
+   if the offset stays too large (see sync_max_offset_us). */
+void HearingAid::note_tx_done()
+{
+    if constexpr (sync_max_offset_us == 0U) {
+        return;
+    }
+    if (curr_read_index == 0U) {
+        return;
+    }
+    uint32_t const idx = curr_read_index - 1U;
+    uint32_t const now = time_us_32();
+    size_t const slot = idx % tx_done_idx.size();
+    tx_done_idx[slot] = idx;
+    tx_done_us[slot] = now;
+
+    if (!other || !other->is_streaming() || !is_streaming() || sync_hold || other->sync_hold) {
+        sync_window_reset();
+        return;
+    }
+    if (other->tx_done_idx[slot] != idx) {
+        return;     // the other aid has not finished this SDU yet
+    }
+    int32_t const d = (int32_t)(now - other->tx_done_us[slot]);
+    sync_sum_us += (uint64_t)(d < 0 ? -d : d);
+    if (++sync_pairs < sync_window_pairs) {
+        return;
+    }
+    uint32_t const mean_us = (uint32_t)(sync_sum_us / sync_pairs);
+    sync_sum_us = 0U;
+    sync_pairs = 0U;
+    if (!sync_reported) {
+        sync_reported = true;
+        short_log(conn_id, "L/R offset: %lu us", (unsigned long)mean_us);
+    }
+    if (mean_us <= sync_max_offset_us) {
+        sync_bad_windows = 0U;
+        if (++sync_good_windows >= sync_good_windows_reset) {
+            sync_good_windows = 0U;
+            sync_attempts = 0U;
+        }
+        return;
+    }
+    sync_good_windows = 0U;
+    if (++sync_bad_windows >= sync_bad_windows_limit && sync_attempts < sync_max_auto_attempts) {
+        ++sync_attempts;
+        short_log(conn_id, "Resync: L/R offset %lu us (%lu/%lu)", (unsigned long)mean_us,
+                  (unsigned long)sync_attempts, (unsigned long)sync_max_auto_attempts);
+        sync_window_reset();
+        request_audio_restart();
+    }
 }
 
 void HearingAid::send_acp_stop()
