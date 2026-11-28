@@ -1852,6 +1852,8 @@ void HearingAid::sync_window_reset()
    if the offset stays too large (see sync_max_offset_us). */
 void HearingAid::note_tx_done()
 {
+    using namespace comm;
+
     if constexpr (sync_max_offset_us == 0U) {
         return;
     }
