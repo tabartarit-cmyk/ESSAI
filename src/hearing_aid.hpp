@@ -65,6 +65,14 @@ constexpr uint32_t start_notify_timeout_ticks = 3000;
 // it did before, so that a stuck aid can never block the other one.
 constexpr uint32_t start_sync_timeout_ticks = 1500;
 
+// When both aids are starting together, the ASP "start OK" notification of one
+// can reach the Pico much later than the other's (the two BLE links have their
+// own connection events, tens of ms apart). The aid answering first then holds
+// its audio back for at most this long (ticks, 1 ms) so that both aids begin on
+// the same SDU, in stereo, instead of one starting alone in mono and the other
+// joining a running stream. Must stay below audio_sdu_gap_timeout_ticks.
+constexpr uint32_t peer_start_hold_ticks = 300;
+
 // Optional: when a full left/right set has been paired before but only one aid
 // is connected, hold that aid's first ACP Start back for up to this many
 // milliseconds (audio loop ticks) while waiting for the second aid. Without it
@@ -321,6 +329,11 @@ private:
     // Ticks spent in Ready, able to start, while waiting for the other aid
     // (see start_sync_timeout_ticks).
     uint32_t sync_wait_ticks = 0U;
+
+    // Streaming, but holding its audio back until the other aid has answered its
+    // own ACP Start (see peer_start_hold_ticks).
+    bool sync_hold = false;
+    uint32_t sync_hold_ticks = 0U;
 
     std::array<uint8_t, ASHA_SDU_SIZE_BYTES> recv_buff = {};
 

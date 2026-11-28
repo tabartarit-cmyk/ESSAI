@@ -1287,9 +1287,23 @@ void HearingAid::handle_gatt_notification(PACKET_HANDLER_PARAMS)
                         //LOG_INFO("%s: Audio start OK", ha->get_side_str());
                         add_event_to_buffer(ha->conn_id, EventPacket(EventType::ASPStart));
                         bool const other_streaming = ha->other && ha->other->is_streaming();
+                        // The other aid has been sent its ACP Start but has not answered yet
+                        bool const other_pending = ha->other && !other_streaming
+                            && ha->other->process_state == ProcessState::Audio
+                            && (ha->other->audio_state & ~(uint32_t)AudioState::AudioBusy) == AudioState::Start;
                         ha->audio_state = AudioState::Streaming;
                         ha->audio_start_index = asha_audio_get_write_index() + (other_streaming ? 1u : 0u);
-                        asha_audio_set_encode_mono(!other_streaming);
+                        // Mono only if this aid is alone; if the other one is about to
+                        // start, encode in stereo from the beginning.
+                        asha_audio_set_encode_mono(!other_streaming && !other_pending);
+                        ha->sync_hold = other_pending;
+                        ha->sync_hold_ticks = 0U;
+                        if (other_streaming && ha->other->sync_hold) {
+                            // The other aid was waiting for this one: both aids now
+                            // begin on the same SDU.
+                            ha->other->audio_start_index = ha->audio_start_index;
+                            ha->other->sync_hold = false;
+                        }
                         if (!other_streaming) {
                             asha_audio_request_stream_reset();
                         }
@@ -1520,6 +1534,16 @@ bool HearingAid::process_audio()
                         ha->curr_vol = v;
                         // short_log(ha->conn_id, "USB L:%d R:%d", (int)usb_vol_l, (int)usb_vol_r);
                         ha->send_volume(ha->curr_vol);
+                    }
+                    if (ha->sync_hold) {
+                        // Wait for the other aid's ASP start, so both begin together
+                        ha->audio_sdu_gap_ticks = 0U;
+                        bool const other_pending = ha->other
+                            && (ha->other->audio_state & ~(uint32_t)AudioState::AudioBusy) == AudioState::Start;
+                        if (other_pending && ++ha->sync_hold_ticks < peer_start_hold_ticks) {
+                            break;
+                        }
+                        ha->sync_hold = false;
                     }
                     if (w_index == 0) {
                         break;
@@ -1953,6 +1977,8 @@ void HearingAid::reset()
     acp_write_acked = false;
     hold_start_ticks = 0U;
     sync_wait_ticks = 0U;
+    sync_hold = false;
+    sync_hold_ticks = 0U;
 
     if (!cached) {
         memset(addr, 0U, sizeof(bd_addr_t));
